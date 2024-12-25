@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ball Game</title>
+</head>
+
+<body>
+    <h1>Ball Game</h1>
+    <button id='btnCreate'>New Game</button>
+    <button id='btnJoin'>Join Game</button>
+    <input type='text' id='txtGameId'>
+    <button id="btnRollDice" disabled>Roll Dice</button>
+    <div id='divPlayers'></div>
+    <div id='divBoard'></div>
+
+    <script>
+        let clientId = null;
+        let gameId = null;
+        let playerColor = null;
+        let currentPlayerIndex = 0;
+        let gameState = null;
+
+        let ws = new WebSocket("ws://localhost:9090");
+        const btnCreate = document.getElementById("btnCreate");
+        const btnJoin = document.getElementById("btnJoin");
+        const txtGameId = document.getElementById("txtGameId");
+        const divPlayers = document.getElementById("divPlayers");
+        const divBoard = document.getElementById("divBoard");
+
+        document.getElementById("btnRollDice").addEventListener("click", () => {
+            const payLoad = { 
+                method: "rollDice", 
+                clientId, 
+                gameId 
+            };
+            ws.send(JSON.stringify(payLoad));
+        });
+
+        btnJoin.addEventListener("click", e => {
+            if (gameId === null) gameId = txtGameId.value;
+
+            const payLoad = {
+                "method": "join",
+                "clientId": clientId,
+                "gameId": gameId
+            };
+
+            ws.send(JSON.stringify(payLoad));
+        });
+
+        btnCreate.addEventListener("click", e => {
+            const payLoad = {
+                "method": "create",
+                "clientId": clientId
+            };
+
+            ws.send(JSON.stringify(payLoad));
+        });
+
+        ws.onmessage = message => {
+            const response = JSON.parse(message.data);
+
+            // Connect
+            if (response.method === "connect") {
+                clientId = response.clientId;
+                console.log("Client id Set successfully " + clientId);
+            }
+
+            // Create game
+            if (response.method === "create") {
+                gameId = response.game.id;
+                console.log("Game successfully created with id " + response.game.id);
+            }
+
+            // Update game state
+            if (response.method === "update") {
+                gameState = response.game;
+                updateGameUI(gameState);
+            }
+
+            // Action prompt for special actions
+            if (response.method === "actionPrompt") {
+                const targetPlayerColor = prompt("Enter target player color (Red, Yellow, White):");
+                const targetBoxId = prompt("Enter target box ID (1, 2, 3):");
+
+                const targetPlayer = gameState.clients.find(player => player.color.toLowerCase() === targetPlayerColor.toLowerCase());
+
+                if (targetPlayer) {
+                    const payLoad = { 
+                        method: "specialAction", 
+                        clientId, 
+                        gameId, 
+                        targetPlayerId: targetPlayer.clientId, 
+                        targetBoxId 
+                    };
+                    ws.send(JSON.stringify(payLoad));
+                } else {
+                    alert("Player with that color not found!");
+                }
+            }
+
+            // Alert for fresh box
+            if (response.method === "alert") {
+                alert(response.message);
+            }
+
+            // Join game
+            if (response.method === "join") {
+                const game = response.game;
+                document.getElementById("btnRollDice").disabled = false;
+
+                divPlayers.innerHTML = '';
+                game.clients.forEach(c => {
+                    const playerDiv = document.createElement("div");
+                    playerDiv.textContent = `${c.clientId} (${c.color})`;
+                    divPlayers.appendChild(playerDiv);
+
+                    if (c.clientId === clientId) playerColor = c.color;
+                });
+
+                divBoard.innerHTML = '';
+                game.clients.forEach((player, playerIndex) => {
+                    for (let j = 1; j <= 3; j++) {
+                        const box = player.balls[j];
+                        const ballButton = document.createElement("button");
+                        ballButton.textContent = `Box ${j} (Counter: ${box.counter})`;
+                        ballButton.id = `box${playerIndex}_${j}`;
+                        ballButton.style.height = "100px";
+                        ballButton.style.fontSize = "16px";
+                        ballButton.style.background = player.color;
+                        ballButton.style.margin = "5px";
+                        ballButton.style.width = "120px";
+                        // ballButton.addEventListener("click", () => {
+                        //     if (box.counter === 0 && box.hit === 0) {
+                        //         alert("The targeted box is fresh!");
+                        //     } else if (box.counter === 0 && box.hit > 0) {
+                        //         delete player.balls[j];
+                        //         ballButton.textContent = "Box Eliminated";
+                        //     } else {
+                        //         const payLoad = {
+                        //             method: "play",
+                        //             clientId,
+                        //             gameId,
+                        //             ballId: j,
+                        //             color: playerColor
+                        //         };
+                        //         ws.send(JSON.stringify(payLoad));
+                        //     }
+                        // });
+                        divBoard.appendChild(ballButton);
+                    }
+                });
+            }
+
+            // Enable/Disable dice roll based on turn
+            if (response.method === "turn") {
+                if (response.currentTurn === clientId) {
+                    document.getElementById("btnRollDice").disabled = false;
+                } else {
+                    document.getElementById("btnRollDice").disabled = true;
+                }
+            }
+        };
+
+        // Update the game UI
+        function updateGameUI(game) {
+            // Update players and balls on the UI based on game state
+            divPlayers.innerHTML = '';
+            divBoard.innerHTML = '';
+
+            game.clients.forEach(c => {
+                const playerDiv = document.createElement("div");
+                playerDiv.textContent = `${c.clientId} (${c.color})`;
+                divPlayers.appendChild(playerDiv);
+            });
+
+            game.clients.forEach((player, playerIndex) => {
+                for (let boxId = 1; boxId <= 3; boxId++) {
+                    const box = player.balls[boxId];
+                    const ballButton = document.createElement("button");
+
+                    // Check if the box is eliminated
+                    if (box.eliminated) {
+                        ballButton.innerHTML = `Box ${boxId}: Eliminated`;
+                        ballButton.disabled = true;
+                    } else {
+                        // Set button text with the counter value
+                        ballButton.innerHTML = `Box ${boxId}: <span style="font-size: 24px; font-weight: bold;">${box.counter}</span>`;
+                    }
+
+                    // Set button height to 100px and add styling
+                    ballButton.style.height = "100px";  // Height set to 100px
+                    ballButton.style.fontSize = "16px";  // Default font size for text
+                    ballButton.style.background = player.color;
+                    ballButton.style.margin = "5px";  // Optional: space between buttons
+                    ballButton.style.width = "120px";  // Set width (optional)
+
+                    // Adding an event listener for click behavior
+                    // ballButton.addEventListener("click", () => {
+                    //     if (box.counter === 0 && box.hit === 0) {
+                    //         alert("The targeted box is fresh!");
+                    //     } else if (box.counter === 0 && box.hit > 0) {
+                    //         alert("This box has been eliminated!");
+                    //     } else {
+                    //         const payLoad = {
+                    //             method: "play",
+                    //             clientId,
+                    //             gameId,
+                    //             ballId: boxId,
+                    //             color: playerColor
+                    //         };
+                    //         ws.send(JSON.stringify(payLoad));
+                    //     }
+                    // });
+
+                    // Append the button to the board
+                    divBoard.appendChild(ballButton);
+                }
+            });
+        }
+
+    </script>
+</body>
+
+</html>
