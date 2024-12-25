@@ -138,6 +138,7 @@ wsServer.on("request", request => {
                 method: "update",
                 game
             };
+            //hello
             game.clients.forEach((p) => {
                 clients[p.clientId].connection.send(JSON.stringify(payLoad));
             });
